@@ -6,15 +6,15 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
-# Import our new AI service function
+# Import our AI service function (the file name doesn't change)
 from ai_service import get_ai_analysis
 
 # Load environment variables from the .env file
 load_dotenv()
 
-# Check if the API key is set
-if not os.getenv("OPENAI_API_KEY"):
-    print("Warning: OPENAI_API_KEY environment variable not set.")
+# Check if the GOOGLE_API_KEY is set
+if not os.getenv("GOOGLE_API_KEY"):
+    print("Warning: GOOGLE_API_KEY environment variable not set.")
 
 class CodeSnippet(BaseModel):
     code: str

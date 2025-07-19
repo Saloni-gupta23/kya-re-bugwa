@@ -1,93 +1,81 @@
 # ai_service.py
 
 import os
-from openai import OpenAI
 import json
+import google.generativeai as genai
+from dotenv import load_dotenv
 
-# Initialize the OpenAI client
-# The client automatically looks for the OPENAI_API_KEY in environment variables.
+# --- FIX ---
+# Load environment variables from .env file right at the start.
+load_dotenv()
+# --- END FIX ---
+
+# Configure the Gemini API client
 try:
-    client = OpenAI()
+    api_key = os.getenv("GOOGLE_API_KEY")
+    if not api_key:
+        # This error will now correctly trigger only if the key is truly missing from the .env file
+        raise ValueError("GOOGLE_API_KEY not found in environment variables. Make sure it's set in your .env file.")
+    genai.configure(api_key=api_key)
+    # Initialize the Generative Model
+    model = genai.GenerativeModel('gemini-1.5-flash')
 except Exception as e:
-    print(f"Error initializing OpenAI client: {e}")
-    # In a real app, you might want to handle this more gracefully
-    client = None
+    print(f"Error configuring Gemini client: {e}")
+    model = None
 
 def get_ai_analysis(code: str, ast_representation: str):
     """
-    Analyzes the given code and its AST using the OpenAI API.
-
-    Args:
-        code: The user's Python code as a string.
-        ast_representation: The string representation of the code's AST.
-
-    Returns:
-        A dictionary containing the AI's analysis or an error message.
+    Analyzes the given code and its AST using the Google Gemini API.
     """
-    if not client:
-        return {"error": "OpenAI client not initialized. Check your API key."}
+    if not model:
+        return {"error": "Gemini client not initialized. Check your API key and configuration."}
 
-    # This is the prompt from your project plan!
-    # We are instructing the AI on its role, the task, and the desired output format (JSON).
     prompt = f"""
-    You are an expert Python programmer acting as a code debugger. Analyze
-    the following Python code and its Abstract Syntax Tree (AST). Identify any
-    bugs, logical errors, or potential exceptions. Do not comment on style.
+    You are an expert Python code analysis tool. Your task is to identify bugs in a given Python code snippet.
+    Analyze the following Python code and its corresponding Abstract Syntax Tree (AST).
 
-    For each error found, provide a JSON object with the following keys:
-    - "line_number": The line where the error occurs.
-    - "error_description": A clear explanation of the bug.
-    - "suggested_fix": A concrete code suggestion to fix the bug.
+    Respond with a JSON array of objects. Each object represents a single bug and must have the following keys:
+    - "line_number": (Integer) The line where the bug occurs.
+    - "error_description": (String) A clear, concise explanation of the bug.
+    - "suggested_fix": (String) A concrete code snippet suggesting how to fix the bug.
 
-    Respond ONLY with a valid JSON array of these error objects.
-    If no errors are found, respond with an empty array [].
+    If you find no bugs, you MUST return an empty JSON array: [].
+    Do not include any text, explanations, or markdown formatting outside of the JSON array itself.
 
-    Code:
+    Here is the code to analyze:
+    ---
+    CODE:
     ```python
     {code}
     ```
-
+    ---
     AST:
     ```
     {ast_representation}
     ```
+    ---
+    JSON Response:
     """
 
     try:
-        # Make the API call to the chat completions endpoint
-        response = client.chat.completions.create(
-            model="gpt-4-turbo",  # Or "gpt-3.5-turbo" for a faster, cheaper option
-            messages=[
-                {"role": "system", "content": "You are a helpful Python code analysis assistant that responds in JSON."},
-                {"role": "user", "content": prompt}
-            ],
-            # This ensures the model tries to output valid JSON
-            response_format={"type": "json_object"}
-        )
+        response = model.generate_content(prompt)
+        ai_response_text = response.text.strip()
+        
+        if ai_response_text.startswith("```json"):
+            ai_response_text = ai_response_text[7:]
+        if ai_response_text.startswith("```"):
+            ai_response_text = ai_response_text[3:]
+        if ai_response_text.endswith("```"):
+            ai_response_text = ai_response_text[:-3]
+        
+        ai_response_text = ai_response_text.strip()
 
-        # Extract the content from the response
-        ai_response_content = response.choices[0].message.content
+        parsed_json = json.loads(ai_response_text)
+        return parsed_json
 
-        # The response content should be a JSON string, so we parse it.
-        # It's good practice to wrap this in a try-except in case the AI
-        # doesn't return perfect JSON, despite our instructions.
-        try:
-            # The model might return a JSON object with a key, e.g. {"errors": [...]}.
-            # We need to find the array.
-            parsed_json = json.loads(ai_response_content)
-            # Find the first key in the parsed JSON that holds a list (our array of suggestions)
-            for key, value in parsed_json.items():
-                if isinstance(value, list):
-                    return value
-            # If no list is found, return the raw parsed content
-            return parsed_json
-
-        except (json.JSONDecodeError, TypeError):
-            # If parsing fails, return the raw text content
-            return {"error": "Failed to parse AI response as JSON", "raw_response": ai_response_content}
-
+    except json.JSONDecodeError:
+        return {"error": "Failed to parse AI response as JSON.", "raw_response": response.text}
     except Exception as e:
-        # Handle potential API errors (e.g., network issues, invalid key)
-        print(f"An error occurred with the OpenAI API call: {e}")
-        return {"error": f"An error occurred with the OpenAI API: {e}"}
+        print(f"An error occurred with the Gemini API call: {e}")
+        return {"error": f"An error occurred with the Gemini API: {str(e)}"}
 
