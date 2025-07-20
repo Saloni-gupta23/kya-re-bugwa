@@ -1,0 +1,13 @@
+# Python / Backend
+backend/.venv/
+backend/__pycache__/
+backend/.env
+
+# Node / Frontend
+frontend/ai-pair-programmer/node_modules/
+frontend/ai-pair-programmer/dist/
+frontend/ai-pair-programmer/.vscode/
+
+# IDE / OS specific
+.vscode/
+.DS_Store

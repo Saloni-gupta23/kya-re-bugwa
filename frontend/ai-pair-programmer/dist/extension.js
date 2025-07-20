@@ -45,77 +45,91 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.activate = activate;
 exports.deactivate = deactivate;
-// 1. Import necessary modules
-// 'vscode' contains the VS Code extensibility API
 const vscode = __importStar(__webpack_require__(1));
-// 'axios' is the library we'll use to make HTTP requests to our backend
 const axios_1 = __importDefault(__webpack_require__(2));
-// 2. The 'activate' function: This is the main entry point of your extension.
-// It's called only once when your extension is activated.
+// --- NEW: Create a DiagnosticCollection ---
+// This will manage all the squiggly lines and problems we report.
+// We create it outside 'activate' so it persists.
+const diagnosticCollection = vscode.languages.createDiagnosticCollection('aiPairProgrammer');
 function activate(context) {
-    // 3. Register our command
-    // The command 'ai-pair-programmer.analyzeCode' must match the command field in package.json
+    // When the extension is activated, we push our diagnostic collection to the context's subscriptions.
+    // This ensures it's cleaned up properly when the extension is deactivated.
+    context.subscriptions.push(diagnosticCollection);
     let disposable = vscode.commands.registerCommand('ai-pair-programmer.analyzeCode', async () => {
-        // This is the code that will run every time the user executes our command.
-        // 4. Get the active text editor
         const editor = vscode.window.activeTextEditor;
         if (!editor) {
-            vscode.window.showErrorMessage('No active text editor found. Please open a file to analyze.');
-            return; // Stop execution if no file is open
+            vscode.window.showErrorMessage('No active text editor found.');
+            return;
         }
-        // 5. Get the code from the editor
-        const code = editor.document.getText();
+        const document = editor.document;
+        const code = document.getText();
         if (!code.trim()) {
-            vscode.window.showInformationMessage('The file is empty. Please write some code to analyze.');
-            return; // Stop if the file is empty
+            vscode.window.showInformationMessage('The file is empty.');
+            return;
         }
-        // Optional: Check if the file is a Python file
-        if (editor.document.languageId !== 'python') {
-            vscode.window.showWarningMessage('This extension is optimized for Python. Analysis for other languages may not be accurate.');
-        }
-        // 6. Create and show an output channel
-        // This provides a clean way to show logs and results from our backend.
-        const outputChannel = vscode.window.createOutputChannel('AI Pair Programmer');
-        outputChannel.clear(); // Clear previous results
-        outputChannel.show(true); // Bring the channel into view
-        outputChannel.appendLine('🤖 Contacting the AI Pair Programmer...');
-        // 7. Make the API call to our backend
-        try {
-            outputChannel.appendLine('Sending code for analysis...');
-            const response = await axios_1.default.post('http://127.0.0.1:8000/analyze', {
-                code: code
-            });
-            // 8. Display the result
-            outputChannel.appendLine('✅ Analysis complete!');
-            outputChannel.appendLine('---');
-            // The response.data will contain the JSON from our FastAPI backend.
-            // We use JSON.stringify to format it nicely before printing.
-            const formattedJson = JSON.stringify(response.data, null, 4);
-            outputChannel.appendLine(formattedJson);
-        }
-        catch (error) {
-            // 9. Handle errors (e.g., backend is not running, network error)
-            outputChannel.appendLine('❌ An error occurred.');
-            if (axios_1.default.isAxiosError(error) && error.response) {
-                // The request was made and the server responded with a status code
-                // that falls out of the range of 2xx (e.g., our 400 SyntaxError)
-                outputChannel.appendLine(`Error from backend: ${error.response.status} ${error.response.statusText}`);
-                const formattedJson = JSON.stringify(error.response.data, null, 4);
-                outputChannel.appendLine(formattedJson);
+        // Show a progress notification to the user
+        vscode.window.withProgress({
+            location: vscode.ProgressLocation.Notification,
+            title: "AI Pair Programmer",
+            cancellable: false
+        }, async (progress) => {
+            progress.report({ message: "Analyzing your code..." });
+            const graphqlQuery = {
+                query: `
+                    query AnalyzeCode($code: String!) {
+                        analyzeCode(code: $code) {
+                            lineNumber
+                            errorDescription
+                            suggestedFix
+                        }
+                    }
+                `,
+                variables: { code: code }
+            };
+            try {
+                const response = await axios_1.default.post('http://127.0.0.1:8000/graphql', graphqlQuery, {
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                const suggestions = response.data.data.analyzeCode;
+                // --- NEW: Process suggestions into Diagnostics ---
+                const diagnostics = [];
+                if (suggestions && suggestions.length > 0) {
+                    suggestions.forEach(suggestion => {
+                        // VS Code lines are 0-indexed, but our AI gives 1-indexed lines.
+                        const line = suggestion.lineNumber - 1;
+                        // Find the full line of text to underline the whole thing.
+                        const lineOfText = document.lineAt(line);
+                        const range = new vscode.Range(new vscode.Position(line, lineOfText.firstNonWhitespaceCharacterIndex), new vscode.Position(line, lineOfText.range.end.character));
+                        // Create the diagnostic message
+                        const message = `${suggestion.errorDescription}\nSuggested Fix: ${suggestion.suggestedFix}`;
+                        const diagnostic = new vscode.Diagnostic(range, message, vscode.DiagnosticSeverity.Error // Show as a red error
+                        );
+                        // Provide a source for the error
+                        diagnostic.source = 'AI Pair Programmer';
+                        diagnostics.push(diagnostic);
+                    });
+                }
+                // Clear old diagnostics for this file and set the new ones
+                diagnosticCollection.set(document.uri, diagnostics);
+                if (diagnostics.length > 0) {
+                    vscode.window.showInformationMessage(`AI Pair Programmer found ${diagnostics.length} issue(s).`);
+                }
+                else {
+                    vscode.window.showInformationMessage('AI Pair Programmer found no issues. Great work!');
+                }
             }
-            else {
-                // Something happened in setting up the request that triggered an Error
-                outputChannel.appendLine('Could not connect to the AI backend. Is it running?');
-                outputChannel.appendLine(error.message);
+            catch (error) {
+                vscode.window.showErrorMessage('Failed to get analysis. Is the backend server running?');
+                console.error(error);
             }
-        }
+        });
     });
-    // Add the command to the extension's context so it will be disposed of when the extension is deactivated
     context.subscriptions.push(disposable);
 }
-// 10. The 'deactivate' function: This is called when your extension is deactivated.
-// You can use it to clean up any resources.
-function deactivate() { }
+function deactivate() {
+    // When the extension is deactivated, clear all diagnostics.
+    diagnosticCollection.clear();
+}
 
 
 /***/ }),
