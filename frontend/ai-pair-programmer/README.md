@@ -10,7 +10,7 @@ An intelligent, real-time coding assistant integrated directly into Visual Studi
 
 ### Demo
 
-*(It is highly recommended to record a short GIF of the extension in action and place it here. You can use tools like [LiceCap](https://www.cockos.com/licecap/) or [ScreenToGif](https://www.screentogif.com/) to create one.)*
+Yet to be published.
 
 ![AI Pair Programmer Demo](https://i.imgur.com/g8c5YtM.gif) 
 *A demonstration showing the extension identifying a bug and providing a suggestion.*
